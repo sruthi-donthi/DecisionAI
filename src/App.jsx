@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import "./App.css";
 
-const API_URL = "http://127.0.0.1:8000";
+const API_URL = "https://decisionai-w2pt.onrender.com";
 
 const INITIAL_MESSAGE = {
   role: "assistant",
