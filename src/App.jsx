@@ -173,24 +173,12 @@ export default function App() {
         },
       ]);
     } catch (err) {
-      let errorMessage =
-        err instanceof Error
-          ? err.message
-          : "Something went wrong.";
-
-      if (
-        err instanceof TypeError &&
-        /fetch/i.test(errorMessage)
-      ) {
-        errorMessage =
-          "Cannot connect to the backend. Make sure FastAPI is running on port 8000.";
-      }
-
-      setError(errorMessage);
-    } finally {
-      setLoading(false);
-      inputRef.current?.focus();
-    }
+  console.error("DecisionAI error:", err);
+  setError(err?.message || "Network request failed.");
+} finally {
+  setLoading(false);
+  inputRef.current?.focus();
+}
   }
 
   // Clear conversation
