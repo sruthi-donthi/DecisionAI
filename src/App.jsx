@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import "./App.css";
 
 const API_URL = "https://decisionai-w2pt.onrender.com";
@@ -9,74 +9,6 @@ const INITIAL_MESSAGE = {
     "Hi! Welcome to DecideAI! 👋\n\nI am your AI assistant. Ask me anything about technology, programming, education, products, or general topics.\n\nHow can I help you today?",
 };
 
-// Format bold text and inline code
-function formatInline(text) {
-  return text.split(/(\*\*.*?\*\*|`.*?`)/g).map((part, index) => {
-    if (part.startsWith("**") && part.endsWith("**")) {
-      return <strong key={index}>{part.slice(2, -2)}</strong>;
-    }
-
-    if (part.startsWith("`") && part.endsWith("`")) {
-      return <code key={index}>{part.slice(1, -1)}</code>;
-    }
-
-    return part;
-  });
-}
-
-// Format AI responses
-function FormattedMessage({ content }) {
-  return (
-    <div className="formatted-message">
-      {String(content || "")
-        .split("\n")
-        .map((line, index) => {
-          const text = line.trim();
-
-          if (!text) {
-            return <div key={index} className="message-spacer" />;
-          }
-
-          if (/^#{1,6}\s/.test(text)) {
-            return (
-              <h3 key={index}>
-                {formatInline(text.replace(/^#{1,6}\s/, ""))}
-              </h3>
-            );
-          }
-
-          if (/^[-*]\s/.test(text)) {
-            return (
-              <div key={index} className="message-list-item">
-                <span>•</span>
-                <span>{formatInline(text.replace(/^[-*]\s/, ""))}</span>
-              </div>
-            );
-          }
-
-          if (/^\d+[.)]\s/.test(text)) {
-            const number = text.match(/^\d+[.)]/)?.[0] || "";
-
-            return (
-              <div key={index} className="message-list-item">
-                <span>{number}</span>
-                <span>
-                  {formatInline(text.replace(/^\d+[.)]\s/, ""))}
-                </span>
-              </div>
-            );
-          }
-
-          if (/^---+$/.test(text)) {
-            return <hr key={index} />;
-          }
-
-          return <p key={index}>{formatInline(text)}</p>;
-        })}
-    </div>
-  );
-}
-
 export default function App() {
   const [messages, setMessages] = useState([INITIAL_MESSAGE]);
   const [input, setInput] = useState("");
@@ -86,7 +18,6 @@ export default function App() {
   const inputRef = useRef(null);
   const messagesEndRef = useRef(null);
 
-  // Scroll to latest message
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({
       behavior: "smooth",
@@ -94,77 +25,58 @@ export default function App() {
     });
   }, [messages, loading, error]);
 
-  // Send message to FastAPI
   async function sendMessage(event) {
     event.preventDefault();
 
     const message = input.trim();
 
-    if (!message || loading) {
-      return;
-    }
+    if (!message || loading) return;
 
     setInput("");
     setError("");
     setLoading(true);
 
-    // Display current user message
     setMessages((previous) => [
       ...previous,
-      {
-        role: "user",
-        content: message,
-      },
+      { role: "user", content: message },
     ]);
+
+    const controller = new AbortController();
+
+    // Allow time for Render's free service to wake up.
+    const timeoutId = setTimeout(() => controller.abort(), 90000);
 
     try {
       const response = await fetch(`${API_URL}/chat`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Accept: "application/json",
         },
-
-        // IMPORTANT:
-        // No previous conversation is sent to Groq.
         body: JSON.stringify({
-          message: message,
+          message,
           history: [],
         }),
+        signal: controller.signal,
+        mode: "cors",
       });
 
-      let data;
-
-      try {
-        data = await response.json();
-      } catch {
-        throw new Error("Invalid response from the backend.");
-      }
+      const data = await response.json();
 
       if (!response.ok) {
         const detail = data?.detail;
 
-        let errorMessage = `Request failed with status ${response.status}.`;
-
-        if (typeof detail === "string") {
-          errorMessage = detail;
-        } else if (Array.isArray(detail)) {
-          errorMessage = detail
-            .map((item) => item.msg || JSON.stringify(item))
-            .join("; ");
-        }
-
-        throw new Error(errorMessage);
+        throw new Error(
+          typeof detail === "string"
+            ? detail
+            : `The server returned error ${response.status}.`
+        );
       }
 
-      if (
-        !data ||
-        typeof data.reply !== "string" ||
-        !data.reply.trim()
-      ) {
-        throw new Error("The AI returned an empty response.");
+      if (typeof data?.reply !== "string" || !data.reply.trim()) {
+        throw new Error("The AI returned an empty response. Please try again.");
       }
 
-      // Display AI response
       setMessages((previous) => [
         ...previous,
         {
@@ -173,128 +85,94 @@ export default function App() {
         },
       ]);
     } catch (err) {
-  console.error("DecisionAI error:", err);
-  setError(err?.message || "Network request failed.");
-} finally {
-  setLoading(false);
-  inputRef.current?.focus();
-}
+      console.error("DecideAI request failed:", err);
+
+      let errorMessage;
+
+      if (err.name === "AbortError") {
+        errorMessage =
+          "The request took too long. Please try again in a moment.";
+      } else if (err instanceof TypeError) {
+        errorMessage =
+          "Unable to connect to the server. Check your internet connection and try again.";
+      } else {
+        errorMessage = err.message || "Something went wrong. Please try again.";
+      }
+
+      setError(errorMessage);
+
+      // Restore the message so the user can retry.
+      setInput(message);
+    } finally {
+      clearTimeout(timeoutId);
+      setLoading(false);
+      inputRef.current?.focus();
+    }
   }
 
-  // Clear conversation
   function newChat() {
-    if (loading) {
-      return;
-    }
-
     setMessages([INITIAL_MESSAGE]);
     setInput("");
     setError("");
-
+    setLoading(false);
     inputRef.current?.focus();
   }
 
-  const suggestions = [
-    "What is artificial intelligence?",
-    "Explain Python programming",
-    "Recommend a laptop for students",
-  ];
-
   return (
-    <div className="app-container">
-      {/* Header */}
-      <header className="app-header">
+    <main className="app">
+      <header className="header">
         <div className="brand">
-          <div className="brand-icon">D</div>
-
-          <div className="brand-text">
+          <div className="brand-logo">D</div>
+          <div>
             <h1>DecideAI</h1>
             <p>Your AI Assistant</p>
           </div>
         </div>
 
-        <button
-          type="button"
-          className="new-chat-button"
-          onClick={newChat}
-          disabled={loading}
-        >
+        <button className="new-chat-button" onClick={newChat} type="button">
           + New Chat
         </button>
       </header>
 
-      {/* Chat area */}
-      <main className="chat-container">
-        <section
-          className="messages-container"
-          aria-label="Chat messages"
-          aria-live="polite"
-        >
-          {messages.map((item, index) => (
+      <section className="chat-area" aria-label="Chat conversation">
+        <div className="messages">
+          {messages.map((message, index) => (
             <div
-              key={`${item.role}-${index}`}
               className={`message-row ${
-                item.role === "user"
-                  ? "user-row"
-                  : "assistant-row"
+                message.role === "user" ? "user-row" : "assistant-row"
               }`}
+              key={`${index}-${message.role}`}
             >
-              {item.role === "assistant" && (
-                <div className="avatar assistant-avatar">
-                  AI
-                </div>
-              )}
+              <div className="avatar">
+                {message.role === "user" ? "You" : "AI"}
+              </div>
 
               <div
                 className={`message-bubble ${
-                  item.role === "user"
-                    ? "user-message"
-                    : "assistant-message"
+                  message.role === "user" ? "user-bubble" : "assistant-bubble"
                 }`}
               >
-                {item.role === "assistant" ? (
-                  <FormattedMessage content={item.content} />
-                ) : (
-                  <p>{item.content}</p>
-                )}
+                {message.content}
               </div>
-
-              {item.role === "user" && (
-                <div className="avatar user-avatar">
-                  You
-                </div>
-              )}
             </div>
           ))}
 
-          {/* Loading indicator */}
           {loading && (
             <div className="message-row assistant-row">
-              <div className="avatar assistant-avatar">
-                AI
-              </div>
-
-              <div
-                className="message-bubble assistant-message typing-bubble"
-                role="status"
-              >
-                <span className="typing-dot" />
-                <span className="typing-dot" />
-                <span className="typing-dot" />
-                <span>DecideAI is thinking...</span>
+              <div className="avatar">AI</div>
+              <div className="message-bubble assistant-bubble loading-text">
+                Thinking...
               </div>
             </div>
           )}
 
-          {/* Error message */}
           {error && (
             <div className="error-message" role="alert">
               <strong>Unable to get a response</strong>
-
               <p>{error}</p>
-
               <button
                 type="button"
+                className="dismiss-button"
                 onClick={() => setError("")}
               >
                 Dismiss
@@ -302,60 +180,34 @@ export default function App() {
             </div>
           )}
 
-          {/* Suggested questions */}
-          {messages.length === 1 && !loading && (
-            <div className="suggestions">
-              <p>Try asking:</p>
-
-              <div className="suggestion-list">
-                {suggestions.map((suggestion) => (
-                  <button
-                    key={suggestion}
-                    type="button"
-                    className="suggestion-button"
-                    onClick={() => {
-                      setInput(suggestion);
-                      inputRef.current?.focus();
-                    }}
-                  >
-                    {suggestion}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
           <div ref={messagesEndRef} />
-        </section>
+        </div>
+      </section>
 
-        {/* Message input */}
-        <footer className="chat-footer">
-          <form className="chat-form" onSubmit={sendMessage}>
-            <input
-              ref={inputRef}
-              type="text"
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
-              placeholder="Ask me anything..."
-              aria-label="Enter your message"
-              maxLength={2000}
-              disabled={loading}
-            />
+      <form className="input-area" onSubmit={sendMessage}>
+        <input
+          ref={inputRef}
+          type="text"
+          value={input}
+          onChange={(event) => setInput(event.target.value)}
+          placeholder="Ask me anything..."
+          aria-label="Message"
+          autoComplete="off"
+          disabled={loading}
+        />
 
-            <button
-              type="submit"
-              className="send-button"
-              disabled={loading || !input.trim()}
-            >
-              {loading ? "Thinking..." : "Send ↑"}
-            </button>
-          </form>
+        <button
+          className="send-button"
+          type="submit"
+          disabled={loading || !input.trim()}
+        >
+          {loading ? "Wait..." : "Send ↑"}
+        </button>
+      </form>
 
-          <p className="footer-note">
-            DecideAI can make mistakes. Verify important information.
-          </p>
-        </footer>
-      </main>
-    </div>
+      <footer className="footer">
+        DecideAI can make mistakes. Verify important information.
+      </footer>
+    </main>
   );
 }
